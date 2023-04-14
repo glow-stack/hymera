@@ -1,8 +1,10 @@
 module hymera;
 
+import core.sys.linux.sys.inotify;
+
 import std.getopt, std.regex, std.stdio, std.socket;
 
-import photon, http;
+import photon, http, dinotify;
 
 class HelloWorldProcessor : HttpProcessor {
     HttpHeader[] headers = [HttpHeader("Content-Type", "text/plain; charset=utf-8")];
@@ -49,7 +51,13 @@ void fileWatch() {
 }
 
 void compileServer() {
-
+	auto inotify = iNotifyTree(".", IN_CREATE | IN_DELETE);
+	while (true) {
+		auto events = inotify.read();
+		foreach (ev; events) {
+			writeln("Event: %s", ev);
+		}
+	}
 }
 
 void main()
