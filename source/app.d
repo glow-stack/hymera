@@ -1,6 +1,21 @@
+import std.getopt;
 import std.stdio;
+import std.socket;
+
+import photon;
+
+void server() {
+
+}
+
+void fileWatch() {
+	
+}
 
 void main()
 {
-	writeln("Edit source/app.d to start your project.");
+	startloop();
+	spawn(() => server());
+	spawn(() => fileWatch());
+	runFibers();
 }

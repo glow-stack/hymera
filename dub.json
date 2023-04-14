@@ -4,7 +4,8 @@
 	],
 	"copyright": "Copyright © 2023, Dmitry Olshansky",
 	"dependencies": {
-		"photon": "~>0.1.2"
+		"photon": "~>0.1.2",
+		"dinotify": "~>0.4.0"
 	},
 	"description": "Hymera is a polyglot application server",
 	"license": "BOOST",
