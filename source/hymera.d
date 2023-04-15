@@ -47,17 +47,17 @@ void server() {
 }
 
 void fileWatch() {
-
-}
-
-void compileServer() {
-	auto inotify = iNotifyTree(".", IN_CREATE | IN_DELETE);
+	auto inotify = iNotifyTree(".", IN_CREATE | IN_MODIFY | IN_DELETE);
 	while (true) {
 		auto events = inotify.read();
 		foreach (ev; events) {
 			writeln("Event: %s", ev);
 		}
 	}
+}
+
+void compileServer() {
+	
 }
 
 void main()
