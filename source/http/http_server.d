@@ -1,11 +1,10 @@
 /// An example "HTTP server" with poor usability but sensible performance
 ///
-module http;
-
+module http.http_server;
 import std.array, std.datetime, std.exception, std.format, std.algorithm.mutation, std.socket;
 import core.stdc.stdlib;
 import core.thread, core.atomic;
-import utils.http_parser;
+import http.http_parser;
 
 struct HttpHeader {
 	const(char)[] name, value;

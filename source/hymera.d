@@ -60,8 +60,33 @@ void compileServer() {
 	
 }
 
-void main()
+void main(string[] args)
 {
+    bool defer;
+    bool daemon;
+    bool override_;
+    bool kill;
+    string run;
+    bool trace;
+    bool version_;
+    int workers;
+    auto help = getopt(
+        args,
+        "b", &defer,                // TCP_DEFER_ACCEPT
+        "d", &daemon,               // Deamon mode
+        "g", &override_,            // Allows setting more workers than cores
+        "k", &kill,                 // Gracefully stop all running Hymera processes
+        "r", &run,                  // Run script without listening on socket
+        "t", &trace,                 // Store all client requests in ./trace file
+        "v", &version_,             // Display Hymera's version string
+        "w", &workers               // Forces a certain number of workers
+    ); 
+
+    if (help.helpWanted)
+    {
+        defaultGetoptPrinter("Hymera - a ployglot app server.",
+        help.options);
+    }
 	startloop();
 	spawn(() => server());
 	spawn(() => fileWatch());
