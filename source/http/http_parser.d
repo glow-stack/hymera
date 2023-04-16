@@ -9,6 +9,21 @@ import core.stdc.string;
 alias http_data_cb =  extern(C) int function (http_parser*, const ubyte *at, size_t length);
 alias http_cb = extern(C) int function (http_parser*);
 
+enum HTTTP_MAX_HEADER_SIZE = (80*1024);
+
+/* Flag values for http_parser.flags field */
+enum flags
+  { F_CHUNKED               = 1 << 0
+  , F_CONNECTION_KEEP_ALIVE = 1 << 1
+  , F_CONNECTION_CLOSE      = 1 << 2
+  , F_CONNECTION_UPGRADE    = 1 << 3
+  , F_TRAILING              = 1 << 4
+  , F_UPGRADE               = 1 << 5
+  , F_SKIPBODY              = 1 << 6
+  , F_CONTENTLENGTH         = 1 << 7
+  };
+
+
 public enum HttpParserType: uint {
 	request = 0,
 	response = 1,
@@ -98,24 +113,67 @@ enum HttpError : uint {
 	UNKNOWN,
 };
 
+enum http_parser_url_fields
+  { UF_SCHEMA           = 0
+  , UF_HOST             = 1
+  , UF_PORT             = 2
+  , UF_PATH             = 3
+  , UF_QUERY            = 4
+  , UF_FRAGMENT         = 5
+  , UF_USERINFO         = 6
+  , UF_MAX              = 7
+};
+
 alias http_errno = int;
 
-alias http_parser_url = char*;
+struct http_parser_url {
+  ushort field_set;           /* Bitmask of (1 << UF_*) values */
+  ushort port;                /* Converted UF_PORT string */
+
+  struct field{
+    ushort off;               /* Offset into buffer in which field starts */
+    ushort len;               /* Length of run in buffer */
+  }
+  field[http_parser_url_fields.UF_MAX] field_data;
+}
 
 struct http_parser {
   /** PRIVATE **/
-  uint state; 		   // bitfield
+  uint type : 2;         /* enum http_parser_type */
+  uint flags : 8;       /* F_* values from 'flags' enum; semi-public */
+  uint state : 7;        /* enum state from http_parser.c */
+  uint header_state : 7; /* enum header_state from http_parser.c */
+  uint index : 5;        /* index into current matcher */
+  uint uses_transfer_encoding : 1; /* Transfer-Encoding header is present */
+  uint allow_chunked_length : 1; /* Allow headers with both
+                                          * `Content-Length` and
+                                          * `Transfer-Encoding: chunked` set */
+  uint lenient_http_headers : 1;
+
   uint nread;          /* # bytes read in various scenarios */
-  ulong content_length; /* # bytes in body (0 if no Content-Length header) */
+  ulong content_length; /* # bytes in body. `(uint64_t) -1` (all bits one)
+                            * if no Content-Length header.
+                            */
 
   /** READ-ONLY **/
   ushort http_major;
   ushort http_minor;
-  // bitfield
-  uint status_code_method_http_errono_upgrade;
+  uint status_code : 16; /* responses only */
+  uint method : 8;       /* requests only */
+  uint http_errno : 7;
+
+  /* 1 = Upgrade header was present and the parser has exited because of that.
+   * 0 = No upgrade header present.
+   * Should be checked when http_parser_execute() returns in addition to
+   * error checking.
+   */
+  uint upgrade : 1;
+
   /** PUBLIC **/
   void *data; /* A pointer to get hook to the "connection" or "socket" object */
-}
+};
+
+
 
 struct http_parser_settings {
   http_cb      on_message_begin;
