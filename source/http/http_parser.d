@@ -19,12 +19,31 @@ enum HPE_INVALID_STATUS = 44;
 enum HPE_INVALID_METHOD = 45;
 enum HPE_INVALID_EOF_STATE = 50;
 enum HPE_CLOSED_CONNECTION = 51;
+enum HPE_INVALID_URL = 52;
+enum HPE_LF_EXPECTED = 53;
+enum HPE_INVALID_HEADER_TOKEN = 54;
 
-enum HTTP_ACL = 0;
-enum HTTP_BIND = 1;
+enum HTTP_POST = 0;
+enum HTTP_PUT = 1;
 enum HTTP_CONNECT = 2;
-enum HTTP_DELETE = 3;
-enum HTTP_GET = 4;
+enum HTTP_MKCOL = 3;
+enum HTTP_SUBSCRIBE = 4;
+enum HTTP_REPORT = 5;
+enum HTTP_PROPFIND = 6;
+enum HTTP_LOCK = 7;
+enum HTTP_UNLOCK = 8;
+
+enum HTTP_ACL = 10;
+enum HTTP_BIND = 11;
+
+enum HTTP_DELETE = 12;
+enum HTTP_GET = 13;
+enum HTTP_HEAD = 14;
+
+enum HTTP_OPTIONS = 15;
+enum HTTP_NOTIFY = 16;
+
+enum HTTP_TRACE = 17;
 
 enum HTTTP_MAX_HEADER_SIZE = (80*1024);
 
@@ -140,6 +159,34 @@ enum http_parser_url_fields
   , UF_USERINFO         = 6
   , UF_MAX              = 7
 };
+
+void REEXECUTE() {
+  // noop, TODO: figure out what the heck it does
+}
+
+void CALLBACK_DATA(void* msg) {
+  // noop, TODO: figure out what the heck it does
+}
+
+void CALLBACK_NOTIFY(void* msg) {
+  // noop, ditto
+}
+
+void CALLBACK_NOTIFY_NOADVANCE(void* msg) {
+  // noop, ditto
+}
+
+void MARK(int status) {
+  // noop, ditto
+}
+
+void COUNT_HEADER_SIZE(int i) {
+  // noop, ditto
+}
+
+bool PARSING_HEADER(int state) {
+  return true;
+}
 
 alias http_errno = int;
 alias state = int;
@@ -720,7 +767,7 @@ size_t http_parser_execute (http_parser *parser,
         /* Use of CALLBACK_NOTIFY() here would erroneously return 1 byte read if
          * we got paused.
          */
-        CALLBACK_NOTIFY_NOADVANCE(message_complete);
+        CALLBACK_NOTIFY_NOADVANCE(null/*message_complete*/);
         return 0;
 
       case s_dead:
@@ -764,7 +811,7 @@ size_t http_parser_execute (http_parser *parser,
   for (p=data; p != data + len; p++) {
     ch = *p;
 
-    if (PARSING_HEADER(p_state()))
+    if (PARSING_HEADER(p_state))
       COUNT_HEADER_SIZE(1);
 
 reexecute:
@@ -790,7 +837,7 @@ reexecute:
         if (ch == 'H') {
           p_state= (s_res_or_resp_H);
 
-          CALLBACK_NOTIFY(message_begin);
+          CALLBACK_NOTIFY(null/*message_begin*/);
         } else {
           parser.type = HTTP_REQUEST;
           p_state = s_start_req;
@@ -836,7 +883,7 @@ reexecute:
             goto error;
         }
 
-        CALLBACK_NOTIFY(message_begin);
+        CALLBACK_NOTIFY(null/*message_begin*/);
         break;
       }
 
@@ -862,7 +909,7 @@ reexecute:
           goto error;
         }
 
-        parser.http_major = ch - '0';
+        parser.http_major = cast(ushort)(ch - '0');
         p_state= (s_res_http_dot);
         break;
 
@@ -883,7 +930,7 @@ reexecute:
           goto error;
         }
 
-        parser.http_minor = ch - '0';
+        parser.http_minor = cast(ushort)(ch - '0');
         p_state= (s_res_http_end);
         break;
 
@@ -945,7 +992,7 @@ reexecute:
 
       case s_res_status_start:
       {
-        MARK(status);
+        MARK(s_res_status);
         p_state= (s_res_status);
         parser.index = 0;
 
@@ -958,20 +1005,19 @@ reexecute:
       case s_res_status:
         if (ch == CR) {
           p_state= (s_res_line_almost_done);
-          CALLBACK_DATA(status);
+          CALLBACK_DATA(null/*status*/);
           break;
         }
 
         if (ch == LF) {
           p_state= (s_header_field_start);
-          CALLBACK_DATA(status);
+          CALLBACK_DATA(null/*status*/);
           break;
         }
 
         break;
 
       case s_res_line_almost_done:
-        STRICT_CHECK(ch != LF);
         p_state= (s_header_field_start);
         break;
 
@@ -983,7 +1029,7 @@ reexecute:
         parser.content_length = ulong.max;
 
         if ((!IS_ALPHA(ch))) {
-          SET_ERRNO(HPE_INVALID_METHOD);
+          errorno = HPE_INVALID_METHOD;
           goto error;
         }
 
@@ -1013,7 +1059,7 @@ reexecute:
         }
         p_state= (s_req_method);
 
-        CALLBACK_NOTIFY(message_begin);
+        CALLBACK_NOTIFY(null/*message_begin*/);
 
         break;
       }
@@ -1037,26 +1083,24 @@ reexecute:
  //XX(meth, pos, ch, new_meth) 
             case (HTTP_POST << 16 | 1 << 8 | 'U'):
               parser.method = HTTP_PUT; break;
-/*
-            XX(POST,      1, 'A', PATCH)
-            XX(POST,      1, 'R', PROPFIND)
-            XX(PUT,       2, 'R', PURGE)
-            XX(CONNECT,   1, 'H', CHECKOUT)
-            XX(CONNECT,   2, 'P', COPY)
-            XX(MKCOL,     1, 'O', MOVE)
-            XX(MKCOL,     1, 'E', MERGE)
-            XX(MKCOL,     1, '-', MSEARCH)
-            XX(MKCOL,     2, 'A', MKACTIVITY)
-            XX(MKCOL,     3, 'A', MKCALENDAR)
-            XX(SUBSCRIBE, 1, 'E', SEARCH)
-            XX(SUBSCRIBE, 1, 'O', SOURCE)
-            XX(REPORT,    2, 'B', REBIND)
-            XX(PROPFIND,  4, 'P', PROPPATCH)
-            XX(LOCK,      1, 'I', LINK)
-            XX(UNLOCK,    2, 'S', UNSUBSCRIBE)
-            XX(UNLOCK,    2, 'B', UNBIND)
-            XX(UNLOCK,    3, 'I', UNLINK)
-*/
+            case (HTTP_POST << 16 | 1 << 8 | 'R'):
+            case (HTTP_PUT  << 16 | 2 << 8 | 'R'):
+            case (HTTP_CONNECT << 16 | 1 << 8 | 'H'):
+            case (HTTP_CONNECT << 16 | 1 << 8 | 'P'):
+            case (HTTP_MKCOL << 16 | 1 << 8 | 'O'):
+            case (HTTP_MKCOL << 16 | 1 << 8 | 'E'):
+            case (HTTP_MKCOL << 16 | 1 << 8 | '-'):
+            case (HTTP_MKCOL << 16 | 2 << 8 | 'A'):
+            case (HTTP_MKCOL << 16 | 3 << 8 | 'A'):
+            case (HTTP_SUBSCRIBE << 16 | 1 << 8 | 'E'):
+            case (HTTP_SUBSCRIBE << 16 | 1 << 8 | 'O'):
+            case (HTTP_REPORT << 16 | 2 << 8 | 'B'):
+            case (HTTP_PROPFIND << 16 | 4 << 8 | 'P'):
+            case (HTTP_LOCK << 16 | 1 << 8 | 'I'):
+            case (HTTP_UNLOCK << 16 | 2 << 8 | 'S'):
+            case (HTTP_UNLOCK << 16 | 2 << 8 | 'B'):
+            case (HTTP_UNLOCK << 16 | 3 << 8 | 'I'):
+              break;
             default:
               SET_ERRNO(HPE_INVALID_METHOD);
               goto error;
@@ -1079,8 +1123,8 @@ reexecute:
           p_state= (s_req_server_start);
         }
 
-        UPDATE_STATE(parse_url_char(p_state(), ch));
-        if ((p_state() == s_dead)) {
+        p_state = parse_url_char(p_state, ch);
+        if ((p_state == s_dead)) {
           SET_ERRNO(HPE_INVALID_URL);
           goto error;
         }
@@ -1101,8 +1145,8 @@ reexecute:
             SET_ERRNO(HPE_INVALID_URL);
             goto error;
           default:
-            UPDATE_STATE(parse_url_char(p_state(), ch));
-            if ((p_state() == s_dead)) {
+            p_state = parse_url_char(p_state, ch);
+            if ((p_state == s_dead)) {
               SET_ERRNO(HPE_INVALID_URL);
               goto error;
             }
@@ -1122,20 +1166,18 @@ reexecute:
         switch (ch) {
           case ' ':
             p_state= (s_req_http_start);
-            CALLBACK_DATA(url);
+            CALLBACK_DATA(null /*url*/);
             break;
           case CR:
           case LF:
             parser.http_major = 0;
             parser.http_minor = 9;
-            UPDATE_STATE((ch == CR) ?
-              s_req_line_almost_done :
-              s_header_field_start);
-            CALLBACK_DATA(url);
+            p_state = (ch == CR) ? s_req_line_almost_done : s_header_field_start;
+            CALLBACK_DATA(null/*url*/);
             break;
           default:
-            UPDATE_STATE(parse_url_char(p_state(), ch));
-            if ((p_state() == s_dead)) {
+            p_state = parse_url_char(p_state, ch);
+            if ((p_state == s_dead)) {
               SET_ERRNO(HPE_INVALID_URL);
               goto error;
             }
@@ -1157,32 +1199,28 @@ reexecute:
         break;
 
       case s_req_http_H:
-        STRICT_CHECK(ch != 'T');
         p_state= (s_req_http_HT);
         break;
 
       case s_req_http_HT:
-        STRICT_CHECK(ch != 'T');
         p_state= (s_req_http_HTT);
         break;
 
       case s_req_http_HTT:
-        STRICT_CHECK(ch != 'P');
         p_state= (s_req_http_HTTP);
         break;
 
       case s_req_http_HTTP:
-        STRICT_CHECK(ch != '/');
         p_state= (s_req_http_major);
         break;
 
       case s_req_http_major:
         if ((!IS_NUM(ch))) {
-          SET_ERRNO(HPE_INVALID_VERSION);
+          errorno = HPE_INVALID_VERSION;
           goto error;
         }
 
-        parser.http_major = ch - '0';
+        parser.http_major = cast(ushort)(ch - '0');
         p_state= (s_req_http_dot);
         break;
 
@@ -1203,7 +1241,7 @@ reexecute:
           goto error;
         }
 
-        parser.http_minor = ch - '0';
+        parser.http_minor = cast(ushort)(ch - '0');
         p_state= (s_req_http_end);
         break;
 
