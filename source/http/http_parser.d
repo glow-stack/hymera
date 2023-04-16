@@ -13,6 +13,9 @@ enum HTTP_REQUEST = 1;
 enum HTTP_RESPONSE = 2;
 enum HTTP_BOTH = 3;
 
+enum CONTENT_LENGTH = 1024;
+enum PROXY_CONNECTION = 123;
+
 enum HPE_INVALID_CONSTANT = 42;
 enum HPE_INVALID_VERSION = 43;
 enum HPE_INVALID_STATUS = 44;
@@ -59,6 +62,18 @@ enum flags
   , F_CONTENTLENGTH         = 1 << 7
   };
 
+
+enum h_general = 1;
+enum h_CON = 2;
+enum h_matching_connection = 3;
+enum h_CO = 4;
+enum h_connection = 5;
+enum h_matching_proxy_connection = 6;
+enum h_matching_transfer_encoding = 7;
+enum h_matching_upgrade = 8;
+enum h_matching_content_length = 9;
+enum h_content_length = 10;
+enum h_transfer_encoding = 11;
 
 public enum HttpParserType: uint {
 	request = 0,
@@ -1367,10 +1382,10 @@ reexecute:
 
             case h_matching_connection:
               parser.index++;
-              if (parser.index > sizeof(CONNECTION)-1
+              if (parser.index > CONNECTION.sizeof-1
                   || c != CONNECTION[parser.index]) {
                 parser.header_state = h_general;
-              } else if (parser.index == sizeof(CONNECTION)-2) {
+              } else if (parser.index == CONNECTION.sizeof-2) {
                 parser.header_state = h_connection;
               }
               break;
@@ -1379,10 +1394,10 @@ reexecute:
 
             case h_matching_proxy_connection:
               parser.index++;
-              if (parser.index > sizeof(PROXY_CONNECTION)-1
+              if (parser.index > PROXY_CONNECTION.sizeof-1
                   || c != PROXY_CONNECTION[parser.index]) {
                 parser.header_state = h_general;
-              } else if (parser.index == sizeof(PROXY_CONNECTION)-2) {
+              } else if (parser.index == PROXY_CONNECTION.sizeof-2) {
                 parser.header_state = h_connection;
               }
               break;
@@ -1391,10 +1406,10 @@ reexecute:
 
             case h_matching_content_length:
               parser.index++;
-              if (parser.index > sizeof(CONTENT_LENGTH)-1
+              if (parser.index > CONTENT_LENGTH.sizeof-1
                   || c != CONTENT_LENGTH[parser.index]) {
                 parser.header_state = h_general;
-              } else if (parser.index == sizeof(CONTENT_LENGTH)-2) {
+              } else if (parser.index == CONTENT_LENGTH.sizeof-2) {
                 parser.header_state = h_content_length;
               }
               break;
@@ -1403,10 +1418,10 @@ reexecute:
 
             case h_matching_transfer_encoding:
               parser.index++;
-              if (parser.index > sizeof(TRANSFER_ENCODING)-1
+              if (parser.index > TRANSFER_ENCODING.sizeof-1
                   || c != TRANSFER_ENCODING[parser.index]) {
                 parser.header_state = h_general;
-              } else if (parser.index == sizeof(TRANSFER_ENCODING)-2) {
+              } else if (parser.index == TRANSFER_ENCODING.sizeof-2) {
                 parser.header_state = h_transfer_encoding;
               }
               break;
