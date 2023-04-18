@@ -1,10 +1,59 @@
 /// An example "HTTP server" with poor usability but sensible performance
 ///
 module http.http_server;
-import std.array, std.datetime, std.exception, std.format, std.algorithm.mutation, std.socket;
+
+import std.array, std.range, std.datetime, 
+std.exception, std.format, 
+std.algorithm.mutation, std.socket;
+
 import core.stdc.stdlib;
 import core.thread, core.atomic;
+
 import http.http_parser;
+
+abstract class HttpProcessor {
+	Parser parser;
+	Socket sock;
+    
+	this(Socket sock) {
+		this.sock = sock;
+	}
+
+	void respondWith(string range, int status, HttpHeader[] headers) {
+		char[] buf;
+		foreach (header; headers)
+		{
+			buf ~= header.name;
+			buf ~= ": ";
+			buf ~= header.value;
+			buf ~= "\r\n";
+		}
+		buf ~= range;
+		sock.send(buf);
+	}
+
+	void respondWith(InputRange!dchar range, int status, HttpHeader[] headers) {
+		char[] buf;
+		foreach (el; range){
+			buf ~= cast(char)el;
+		}
+		sock.send(buf);
+	}
+
+    void onComplete(HttpRequest req);
+
+	void run() {
+		char[8096] buf;
+		long size = sock.receive(buf);
+		enforce(size >= 0);
+		parser.put(buf[0..size]);
+		while (!parser.empty) {
+			import std.stdio;
+			writefln("%s\n", parser.front());
+			parser.popFront();
+		}
+	}
+}
 
 struct HttpHeader {
 	const(char)[] name, value;
@@ -51,156 +100,6 @@ shared static ~this(){
 }
 
 
-abstract class HttpProcessor {
-private:
-	enum State { url, field, value, done };
-	ubyte[] buffer;
-	Appender!(char[]) outBuf;
-	HttpHeader[] headers; // buffer for headers
-	size_t header; // current header
-	const(char)[] url; // url
-	alias Parser = HttpParser!HttpProcessor;
- 	Parser parser;
- 	ScratchPad pad;
- 	HttpRequest request;
- 	State state;
- 	bool serving;
-public:
-	Socket client;
-
-	this(Socket sock) {
-		serving = true;
-		client = sock;
-		buffer = new ubyte[2048];
-		headers = new HttpHeader[1];
-		pad = ScratchPad(16*1024);
-		parser = httpParser(this, HttpParserType.request);
-	}
-
-	void run() {
-		scope(exit) {
-		    client.shutdown(SocketShutdown.BOTH);
-		    client.close();
-		}
-		while(serving) {
-            ptrdiff_t received = client.receive(buffer);
-            if (received < 0) {
-                return;
-            }
-            else if (received == 0) { //socket is closed (eof)
-                serving = false;
-            }
-            else {
-            	//TODO: may not parse all of input but that should be an error
-                parser.execute(buffer[0..received]);
-            }
-        }
-	}
-
-	void respondWith(const(char)[] _body, uint status, HttpHeader[] headers...)
-	{
-		return respondWith(cast(const(ubyte)[])_body, status, headers);
-	}
-
-	void respondWith(const(ubyte)[] _body, uint status, HttpHeader[] headers...)
-	{
-		formattedWrite(outBuf,
-            "HTTP/1.1 %s OK\r\n", status
-        );
-        outBuf.put("Server: photon/simple\r\n");
-        //auto date = Clock.currTime!(ClockType.coarse)(UTC());
-        //writeDateHeader(outBuf, date);
-        auto date = cast()atomicLoad(httpDate);
-        outBuf.put(*date);
-        if (!parser.shouldKeepAlive) outBuf.put("Connection: close\r\n");
-        foreach(ref hdr; headers) {
-        	outBuf.put(hdr.name);
-        	outBuf.put(": ");
-        	outBuf.put(hdr.value);
-        	outBuf.put("\r\n");
-        }
-        formattedWrite(outBuf, "Content-Length: %d\r\n\r\n", _body.length);
-        outBuf.put(cast(const(char)[])_body);
-        client.send(outBuf.data); // TODO: short-writes are quite possible
-	}
-
-	void onStart(HttpRequest req) {}
-
-	void onChunk(HttpRequest req, const(ubyte)[] chunk) {}
-
-	void onComplete(HttpRequest req);
-
-//privatish stuff
-	final int onMessageBegin(Parser* parser)
-	{
-		outBuf.clear();
-		header = 0;
-		pad.reset();
-		state = State.url;
-		return 0;
-	}
-
-	final int onUrl(Parser* parser, const(ubyte)[] chunk)
-	{
-		pad.put(chunk);
-		return 0;
-	}
-
-	final int onBody(Parser* parser, const(ubyte)[] chunk)
-	{
-		onChunk(request, chunk);
-		return 0;
-	}
-
-	final int onHeaderField(Parser* parser, const(ubyte)[] chunk)
-	{
-		final switch(state) {
-			case State.url:
-				url = pad.sliceStr;
-				break;
-			case State.value:
-				headers[header].value = pad.sliceStr;
-				header += 1;
-				if (headers.length <= header) headers.length += 1;
-				break;
-			case State.field:
-			case State.done:
-				break;
-		}
-		state = State.field;
-		pad.put(chunk);
-		return 0;
-	}
-
-	final int onHeaderValue(Parser* parser, const(ubyte)[] chunk)
-	{
-		if (state == State.field) {
-			headers[header].name = pad.sliceStr;
-		}
-		pad.put(chunk);
-		state = State.value;
-		return 0;
-	}
-
-	final int onHeadersComplete(Parser* parser)
-	{
-		headers[header].value = pad.sliceStr;
-		header += 1;
-		request = HttpRequest(headers[0..header], parser.method, url);
-		onStart(request);
-		state = State.done;
-		return 0;
-	}
-
-	final int onMessageComplete(Parser* parser)
-	{
-		import std.stdio;
-		if (state == State.done) onComplete(request);
-		if (!parser.shouldKeepAlive) serving = false;
-		return 0;
-	}
-
-}
 
 // ==================================== IMPLEMENTATION DETAILS ==============================================
 private:
