@@ -154,10 +154,11 @@ struct Parser {
     while (pos < buf.length) {
       with (HttpState) switch(state) {
         case METHOD:
-          auto word = buf[pos..pos+4].toLower().strip();
+        import std.regex;
+          auto m = matchFirst(buf[pos..$], r"(delete|get|put|...)\s+(\w+)\s+");
           isEmpty = false;
           event.tag = ParserFields.method;
-          with (HttpMethod) switch(word) {
+          with (HttpMethod) switch(m[1]) {
             case "delete":
               event.method = DELETE;
               pos += "delete".length;
