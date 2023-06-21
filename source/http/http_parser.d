@@ -3,7 +3,7 @@
 module http.http_parser;
 
 import std.range.primitives;
-import std.uni, std.string, std.exception;
+import std.ascii, std.string, std.exception;
 
 enum HTTP_REQUEST = 1;
 enum HTTP_RESPONSE = 2;
@@ -111,25 +111,37 @@ enum   UF_USERINFO         = 6;
 enum   UF_MAX              = 7;
 
 enum ParserFields {
+  body_,
   method,
   url,
   status,
   port,
+  header,
   query,
+  version_,
   fragment,
   userinfo
+}
+
+struct Header
+{
+  char[] key;
+  char[] value;
 }
 
 struct HttpEvent {
   ParserFields tag;
   union {
+    ubyte[] body_;
     int method;
     char[] url;
     int status;
     int port;
+    Header header;
     char[] query;
     char[] fragment;
     char[] userinfo;
+    char[] version_;
   }
 }
 
@@ -138,121 +150,112 @@ enum HttpState {
   URL = 1,
   VERSION = 2,
   HEADER_START = 3,
-  HEADER_CONT = 4,
-  BODY = 5
+  BODY = 4,
+  END = 5
 }
 
 struct Parser {
   char[] buf;
   size_t pos;
   HttpEvent event;
-  bool isEmpty;
+  bool isEmpty = false;
   HttpState state;
 
   void put(char[] bite) {
     buf ~= bite;
-    while (pos < buf.length) {
-      with (HttpState) switch(state) {
-        case METHOD:
-        import std.regex;
-          auto m = matchFirst(buf[pos..$], r"(delete|get|put|...)\s+(\w+)\s+");
-          isEmpty = false;
-          event.tag = ParserFields.method;
-          with (HttpMethod) switch(m[1]) {
-            case "delete":
-              event.method = DELETE;
-              pos += "delete".length;
-              break;
-            case "get":
-              event.method = GET;
-              pos += "get".length;
-              break;
-            case "put":
-              event.method = PUT;
-              pos += "put".length;
-              break;
-            case "head":
-              event.method = HEAD;
-              pos += "head".length;
-              break;
-            case "post":
-              event.method = POST;
-              pos += "post".length;
-              break;
-            case "connect":
-              event.method = CONNECT;
-              pos += "connect".length;
-              break;
-            case "trace":
-              event.method = TRACE;
-              pos += "trace".length;
-              break;
-            /* WebDAV */
-            case "copy":
-              event.method = COPY;
-              pos += "copy".length;
-              break;
-            case "lock":
-              event.method = LOCK;
-              pos += "lock".length;
-              break;
-            case "mkcol":
-              event.method = MKCOL;
-              pos += "mkcol".length;
-              break;
-            case "move":
-              event.method = MOVE;
-              pos += "move".length;
-              break;
-            case "propfind":
-              event.method = PROPFIND;
-              pos += "propfind".length;
-              break;
-            case "proppatch":
-              event.method = PROPPATCH;
-              pos += "proppatch".length;
-              break;
-            case "search":
-              event.method = SEARCH;
-              pos += "search".length;
-              break;
-            case "unlock":
-              event.method = UNLOCK;
-              pos += "unlock".length;
-              break;
-            case "acl":
-              event.method = ACL;
-              pos += "acl".length;
-              break;
-            case "bind":
-              event.method = BIND;
-              pos += "bind".length;
-              break;
-            case "rebind":
-              event.method = REBIND;
-              pos += "rebind".length;
-              break;
-            case "unbind":
-              event.method = UNBIND;
-              pos += "unbind".length;
-              break;
-            default:
-              enforce(false, "Failed to parser HTTP method");
+    step();
+  }
+
+  void skipWs() {
+    while (buf[pos].isWhite()) pos++;
+  }
+
+  void step() {
+    with (HttpState) switch(state) {
+      case METHOD:
+        with (HttpMethod) 
+          if (buf[pos..pos+3].toUpper() == "GET") {
+            event.method = GET;
+            pos += 3;
+          } 
+          else if (buf[pos..pos+3].toUpper() == "PUT") {
+            event.method = PUT;
+            pos += 3;
           }
-          break;
-        case URL:
-          break;
-        case VERSION:
-          break;
-        case HEADER_START:
-          break;
-        case HEADER_CONT:
-          break;
-        case BODY:
-          break;
-        default:
-          assert(false);
-      }
+          else if (buf[pos..pos+4].toUpper() == "POST") {
+            event.method = POST;
+            pos += 4;
+          }
+          else if (buf[pos..pos+6].toUpper() == "DELETE") {
+            event.method = DELETE;
+            pos += 6;
+          }
+        event.tag = ParserFields.method;
+        state = HttpState.URL;
+        break;
+      case URL:
+        skipWs();
+        auto start = pos;
+        while (pos < buf.length) {
+          if (buf[pos].isAlpha() || buf[pos].isDigit())
+            pos++;
+          else
+            break;
+        }
+        event.tag = ParserFields.url;
+        event.url = buf[start..pos];
+        state = HttpState.VERSION;
+        break;
+      case VERSION:
+        skipWs();
+        auto start = pos;
+        while (pos < buf.length) {
+          if (buf[pos].isWhite() || buf[pos] == '.' || buf[pos] == '/' || buf[pos].isAlpha() || buf[pos].isDigit())
+            pos++;
+          else
+            break;
+        }
+        event.tag = ParserFields.version_;
+        event.version_ = buf[start..pos];
+        state = HttpState.HEADER_START;
+        break;
+      case HEADER_START:
+        skipWs();
+        auto start = pos;
+        while (pos < buf.length) {
+          if (buf[pos].isAlpha() || buf[pos].isDigit())
+            pos++;
+          else if (buf[pos] == ':')
+            break;
+          else
+            enforce(false, "Unknown character in http header " ~ buf[pos..$]);
+        }
+        Header hdr;
+        event.tag = ParserFields.header;
+        hdr.key = buf[start..pos];
+        pos++;
+        skipWs();
+        start = pos;
+        while (pos < buf.length) {
+          if (buf[pos].isAlpha() || buf[pos].isDigit())
+            pos++;
+          else
+            break;
+        }
+        hdr.value = buf[start..pos];
+        event.header = hdr;
+        state = BODY;
+        break;
+      case BODY:
+        event.body_ = cast(ubyte[])buf[pos..$];
+        event.tag = ParserFields.body_;
+        state = END;
+        break;
+      case END:
+        isEmpty = true;
+        break;
+      default:
+        assert(false);
     }
   }
 
@@ -264,7 +267,7 @@ struct Parser {
   bool empty() const { return isEmpty; }
 
   void popFront() {
-    isEmpty = true;
+    step();
   }
 
   HttpEvent front() {
