@@ -51,7 +51,7 @@ void fileWatch() {
 	while (true) {
 		auto events = inotify.read();
 		foreach (ev; events) {
-			writeln("Event: %s", ev);
+			writefln("Event: %s", ev);
 		}
 	}
 }

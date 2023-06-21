@@ -73,43 +73,6 @@ public enum HttpMethod: uint {
 	SOURCE = 33,
 }
 
-enum HttpError : uint {
-	OK,
-	/* Parsing-related errors */
-	INVALID_EOF_STATE,
-	HEADER_OVERFLOW,
-	CLOSED_CONNECTION,
-	INVALID_VERSION,
-	INVALID_STATUS,
-	INVALID_METHOD,
-	INVALID_URL,
-	INVALID_HOST,
-	INVALID_PORT,
-	INVALID_PATH,
-	INVALID_QUERY_STRING,
-	INVALID_FRAGMENT,
-	LF_EXPECTED,
-	INVALID_HEADER_TOKEN,
-	INVALID_CONTENT_LENGTH,
-	UNEXPECTED_CONTENT_LENGTH,
-	INVALID_CHUNK_SIZE,
-	INVALID_CONSTANT,
-	INVALID_INTERNAL_STATE,
-	STRICT,
-	PAUSED,
-	UNKNOWN,
-}
-
-
-enum   UF_SCHEMA           = 0;
-enum    UF_HOST             = 1;
-enum UF_PORT             = 2;
-enum   UF_PATH             = 3;
-enum    UF_QUERY            = 4;
-enum   UF_FRAGMENT         = 5;
-enum   UF_USERINFO         = 6;
-enum   UF_MAX              = 7;
-
 enum ParserFields {
   body_,
   method,
@@ -143,6 +106,21 @@ struct HttpEvent {
     char[] userinfo;
     char[] version_;
   }
+  string toString() {
+    import std.conv;
+    switch(tag) {
+      case ParserFields.version_: 
+        return "Version(" ~ version_.idup ~ ")";
+      case ParserFields.method:
+        return "Method("~ method.to!string ~")";
+      case ParserFields.header:
+        return "Header("~ header.key.idup ~"," ~ header.value.idup ~")";
+      case ParserFields.url:
+        return "URL("~ url.idup ~")";
+      default:
+        return "****";
+    }
+  }
 }
 
 enum HttpState {
@@ -171,6 +149,7 @@ struct Parser {
   }
 
   void step() {
+    import std.stdio;
     with (HttpState) switch(state) {
       case METHOD:
         with (HttpMethod) 
@@ -197,7 +176,7 @@ struct Parser {
         skipWs();
         auto start = pos;
         while (pos < buf.length) {
-          if (buf[pos].isAlpha() || buf[pos].isDigit())
+          if (buf[pos] == '/' || buf[pos].isAlpha() || buf[pos].isDigit())
             pos++;
           else
             break;
@@ -210,7 +189,7 @@ struct Parser {
         skipWs();
         auto start = pos;
         while (pos < buf.length) {
-          if (buf[pos].isWhite() || buf[pos] == '.' || buf[pos] == '/' || buf[pos].isAlpha() || buf[pos].isDigit())
+          if (buf[pos] == '.' || buf[pos] == '/' || buf[pos].isAlpha() || buf[pos].isDigit())
             pos++;
           else
             break;
@@ -218,17 +197,22 @@ struct Parser {
         event.tag = ParserFields.version_;
         event.version_ = buf[start..pos];
         state = HttpState.HEADER_START;
+        skipWs();
         break;
       case HEADER_START:
-        skipWs();
         auto start = pos;
         while (pos < buf.length) {
-          if (buf[pos].isAlpha() || buf[pos].isDigit())
+          if (buf[pos] == '-' || buf[pos].isAlpha() || buf[pos].isDigit())
             pos++;
           else if (buf[pos] == ':')
             break;
-          else
-            enforce(false, "Unknown character in http header " ~ buf[pos..$]);
+          else {
+            event.body_ = cast(ubyte[])buf[pos..$];
+            event.tag = ParserFields.body_;
+            state = END;
+            isEmpty = true;
+            return;
+          }
         }
         Header hdr;
         event.tag = ParserFields.header;
@@ -237,19 +221,15 @@ struct Parser {
         skipWs();
         start = pos;
         while (pos < buf.length) {
-          if (buf[pos].isAlpha() || buf[pos].isDigit())
+          if (buf[pos] == '*' || buf[pos] == '/' || buf[pos] == ':' || buf[pos] == '.' || buf[pos].isAlpha() || buf[pos].isDigit())
             pos++;
           else
             break;
         }
         hdr.value = buf[start..pos];
         event.header = hdr;
-        state = BODY;
-        break;
-      case BODY:
-        event.body_ = cast(ubyte[])buf[pos..$];
-        event.tag = ParserFields.body_;
-        state = END;
+        state = HEADER_START;
+        if (buf[pos] == '\r' && buf[pos+1] == '\n') pos += 2;
         break;
       case END:
         isEmpty = true;

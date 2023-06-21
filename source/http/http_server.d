@@ -12,7 +12,6 @@ import core.thread, core.atomic;
 import http.http_parser;
 
 abstract class HttpProcessor {
-	Parser parser;
 	Socket sock;
     
 	this(Socket sock) {
@@ -44,15 +43,33 @@ abstract class HttpProcessor {
 
 	void run() {
 		char[8096] buf;
-		long size = sock.receive(buf);
-		enforce(size >= 0);
-		parser.put(buf[0..size]);
-		while (!parser.empty) {
-			import std.stdio;
-			writefln("%s\n", parser.front());
-			parser.popFront();
+		Parser parser;
+		for (;;) {
+			HttpRequest request;
+			long size = sock.receive(buf);
+			enforce(size >= 0);
+			parser.put(buf[0..size]);
+			while (!parser.empty) {
+				import std.stdio;
+				
+				writeln(parser.front);
+				with (ParserFields) switch(parser.front.tag) {
+					case method:
+						request.method = cast(HttpMethod)parser.front.method;
+						break;
+					case url:
+						request.uri = parser.front.url;
+						break;
+					case version_:
+						request.version_ = parser.front.version_;
+						break;
+					default:
+				}
+				parser.popFront();
+			}
+			onComplete(request);
 		}
-	}
+			}
 }
 
 struct HttpHeader {
@@ -63,6 +80,7 @@ struct HttpRequest {
 	HttpHeader[] headers;
 	HttpMethod method;
 	const(char)[] uri;
+	const(char)[] version_;
 }
 
 shared bool httpServing = true;
