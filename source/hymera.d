@@ -4,14 +4,14 @@ import core.sys.linux.sys.inotify;
 
 import std.getopt, std.regex, std.stdio, std.socket;
 
-import photon, http, dinotify;
+import photon, photon.http, dinotify;
 
 class HelloWorldProcessor : HttpProcessor {
     HttpHeader[] headers = [HttpHeader("Content-Type", "text/plain; charset=utf-8")];
 
     this(Socket sock){ super(sock); }
     
-    override void onComplete(HttpRequest req) {
+    override void handle(HttpRequest req) {
         respondWith("Hello, world!", 200, headers);
     }
 }
