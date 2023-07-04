@@ -30,7 +30,7 @@ void server() {
 	debug writeln("Started server");
 
     void processClient(Socket client) {
-        spawn(() => worker(client));
+        go(() => worker(client));
     }
 
     while(true) {
@@ -88,8 +88,8 @@ void main(string[] args)
         help.options);
     }
 	startloop();
-	spawn(() => server());
-	spawn(() => fileWatch());
-	spawn(() => compileServer());
+	go(() => server());
+	go(() => fileWatch());
+	go(() => compileServer());
 	runFibers();
 }
