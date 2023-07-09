@@ -2,9 +2,36 @@ module hymera;
 
 import core.sys.linux.sys.inotify;
 
-import std.getopt, std.regex, std.stdio, std.socket;
+import std.algorithm, std.conv, std.digest, std.getopt, std.format, std.string, std.regex, std.process, std.stdio, std.file, std.socket;
 
 import photon, photon.http, dinotify;
+
+const(char)[][] split2(const(char)[] inp, const(char)[] sep) {
+    size_t p = 0;
+    const(char)[][] pieces;
+    for (;;) {
+        if (p == inp.length) break;
+        if (inp[p..$].startsWith(sep)) {
+            pieces ~= inp[0..p];
+            if (p + sep.length >= inp.length) break;
+            inp = inp[p + sep.length .. $];
+        } else {
+            p++;
+        }
+    }
+    pieces ~= inp;
+    return pieces;
+}
+
+unittest {
+    auto sp = split2(".a/ab", "/");
+    assert(sp == [".a", "ab"]);
+}
+
+unittest {
+    auto sp2 = split2("/foo/bar/", "/");
+    assert(sp2 == ["", "foo", "bar", ""]);
+}
 
 class HelloWorldProcessor : HttpProcessor {
     HttpHeader[] headers = [HttpHeader("Content-Type", "text/plain; charset=utf-8")];
@@ -12,7 +39,7 @@ class HelloWorldProcessor : HttpProcessor {
     this(Socket sock){ super(sock); }
     
     override void handle(HttpRequest req) {
-        respondWith("Hello, world!", 200, headers);
+        respondWith("Hello, %s".format(req.uri), 200, headers);
     }
 }
 
@@ -23,28 +50,60 @@ void worker(Socket client) {
 }
 
 void server() {
-	Socket server = new TcpSocket();
-    server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
-    server.bind(new InternetAddress("127.0.0.1", 4321));
-    server.listen(1000);
-	debug writeln("Started server");
-
-    void processClient(Socket client) {
-        go(() => worker(client));
-    }
-
-    while(true) {
-        try {
-            debug writeln("Waiting for server.accept()");
-            Socket client = server.accept();
-            debug writeln("New client accepted");
-            processClient(client);
+    auto files = dirEntries(".", SpanMode.breadth);
+    foreach (file; files) {
+        if (file.isFile) {
+            writeln(file.name);
+            scripts[file.name] = cast(ubyte[])read(file.name);
         }
-        catch(Exception e) {
-            writefln("Failure to accept %s", e);
+    }
+    writefln("SCRIPTS %s", scripts.length);
+    
+    const(char)[][const(char)[]] binds;
+    foreach (k, v; scripts) {
+        auto m = matchFirst(k, `(\d+.\d+.\d+.\d+):(\d+)`);
+        if (m) {
+            binds[m[1]] = m[2];
+        }
+        auto parts = split(k, "/");
+        writeln(binds);
+    }
+    foreach (k, v; scripts) {
+        if (k.endsWith(".c")) {
+            try {
+                spawnProcess("gcc -o %s.o %s".format(k, k));
+                writefln(">>>> %s", k);
+            } catch (Exception e) {
+                writefln("<<<< %s", e);
+            }
+        }
+    }
+    foreach (key, value; binds) {
+       Socket server = new TcpSocket();
+        server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
+        server.bind(new InternetAddress(key, value.to!ushort));
+        server.listen(1000);
+        debug writeln("Started server");
+
+        void processClient(Socket client) {
+            go(() => worker(client));
+        }
+
+        while(true) {
+            try {
+                debug writeln("Waiting for server.accept()");
+                Socket client = server.accept();
+                debug writeln("New client accepted");
+                processClient(client);
+            }
+            catch(Exception e) {
+                writefln("Failure to accept %s", e);
+            }
         }
     }
 }
+
+ubyte[][string] scripts;
 
 void fileWatch() {
 	auto inotify = iNotifyTree(".", IN_CREATE | IN_MODIFY | IN_DELETE);
@@ -52,6 +111,7 @@ void fileWatch() {
 		auto events = inotify.read();
 		foreach (ev; events) {
 			writefln("Event: %s", ev);
+            scripts[ev.path] = null;
 		}
 	}
 }
@@ -93,3 +153,6 @@ void main(string[] args)
 	go(() => compileServer());
 	runFibers();
 }
+
+extern(C):
+
