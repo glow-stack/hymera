@@ -1,37 +1,10 @@
 module hymera;
 
-import core.sys.linux.sys.inotify;
+import core.sys.linux.sys.inotify, core.stdc.string, core.sys.posix.unistd;
 
-import std.algorithm, std.conv, std.digest, std.getopt, std.format, std.string, std.regex, std.process, std.stdio, std.file, std.socket;
+import std.algorithm, std.conv, std.digest.sha, std.getopt, std.format, std.string, std.regex, std.process, std.stdio, std.file, std.socket;
 
 import photon, photon.http, dinotify;
-
-const(char)[][] split2(const(char)[] inp, const(char)[] sep) {
-    size_t p = 0;
-    const(char)[][] pieces;
-    for (;;) {
-        if (p == inp.length) break;
-        if (inp[p..$].startsWith(sep)) {
-            pieces ~= inp[0..p];
-            if (p + sep.length >= inp.length) break;
-            inp = inp[p + sep.length .. $];
-        } else {
-            p++;
-        }
-    }
-    pieces ~= inp;
-    return pieces;
-}
-
-unittest {
-    auto sp = split2(".a/ab", "/");
-    assert(sp == [".a", "ab"]);
-}
-
-unittest {
-    auto sp2 = split2("/foo/bar/", "/");
-    assert(sp2 == ["", "foo", "bar", ""]);
-}
 
 class HelloWorldProcessor : HttpProcessor {
     HttpHeader[] headers = [HttpHeader("Content-Type", "text/plain; charset=utf-8")];
@@ -49,11 +22,13 @@ void worker(Socket client) {
     processor.run();
 }
 
+__gshared ubyte[][string] scripts;
+__gshared string[string] scriptHashes;
+
 void server() {
     auto files = dirEntries(".", SpanMode.breadth);
     foreach (file; files) {
         if (file.isFile) {
-            writeln(file.name);
             scripts[file.name] = cast(ubyte[])read(file.name);
         }
     }
@@ -66,19 +41,24 @@ void server() {
             binds[m[1]] = m[2];
         }
         auto parts = split(k, "/");
-        writeln(binds);
     }
     foreach (k, v; scripts) {
         if (k.endsWith(".c")) {
             try {
-                spawnProcess("gcc -o %s.o %s".format(k, k));
                 writefln(">>>> %s", k);
+                auto hash = sha1Of(k);
+                scriptHashes[k.idup] = hash.toHexString.to!string;
+                int pid = fork();
+                if (pid == 0) {
+                    auto p = execv("/usr/bin/clang", ["/usr/bin/clang", "-o", hash.toHexString.to!string, "-c", "-I.", "-fPIC", k.to!string]);
+                    writefln(">222> %s", p);
+                }
             } catch (Exception e) {
                 writefln("<<<< %s", e);
             }
         }
     }
-    foreach (key, value; binds) {
+    foreach (key, value; binds) try {
        Socket server = new TcpSocket();
         server.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, true);
         server.bind(new InternetAddress(key, value.to!ushort));
@@ -100,10 +80,11 @@ void server() {
                 writefln("Failure to accept %s", e);
             }
         }
+    } catch (Exception e) {
+        writefln("Exception while listening %s", e);
     }
+    runFibers();
 }
-
-ubyte[][string] scripts;
 
 void fileWatch() {
 	auto inotify = iNotifyTree(".", IN_CREATE | IN_MODIFY | IN_DELETE);
@@ -156,3 +137,19 @@ void main(string[] args)
 
 extern(C):
 
+struct xbuf
+{
+	char *ptr;       // data buffer
+	union{
+	    uint   allocated; // memory allocated ('size' is an alias of 'allocated')
+	    uint   size;
+    }
+	uint   len;       // memory used
+	uint   growby;    // memory allocation increment
+}
+
+void xbuf_cat(xbuf* buf, const char* fmt, void* arg) {
+    auto f = fmt[0..strlen(fmt)];
+    auto m = f.format("%s", arg);
+    buf.ptr[0..m.length] = m[];
+}
