@@ -1,6 +1,6 @@
 module hymera;
 
-import core.sys.linux.sys.inotify, core.stdc.string, core.sys.posix.unistd;
+import core.sys.linux.sys.inotify, core.stdc.string, core.sys.posix.unistd, core.sys.posix.dlfcn, core.sys.posix.stdlib;
 
 import std.algorithm, std.conv, std.digest.sha, std.getopt, std.format, std.string, std.regex, std.process, std.stdio, std.file, std.socket;
 
@@ -12,18 +12,27 @@ class HelloWorldProcessor : HttpProcessor {
     this(Socket sock){ super(sock); }
     
     override void handle(HttpRequest req) {
+
         respondWith("Hello, %s".format(req.uri), 200, headers);
     }
 }
 
+extern(C) int errno; 
+extern(C) int wait(int* status);
 
 void worker(Socket client) {
 	scope processor =  new HelloWorldProcessor(client);
     processor.run();
 }
 
+struct Script {
+    ubyte[] source;
+    string name;
+    string hexHash;
+}
+
 __gshared ubyte[][string] scripts;
-__gshared string[string] scriptHashes;
+__gshared Script[string] loaded;
 
 void server() {
     auto files = dirEntries(".", SpanMode.breadth);
@@ -46,13 +55,16 @@ void server() {
         if (k.endsWith(".c")) {
             try {
                 writefln(">>>> %s", k);
-                auto hash = sha1Of(k);
-                scriptHashes[k.idup] = hash.toHexString.to!string;
+                auto hash = sha1Of(k).toHexString.to!string;
+                loaded[k] = Script(v, k, hash);
                 int pid = fork();
                 if (pid == 0) {
-                    auto p = execv("/usr/bin/clang", ["/usr/bin/clang", "-o", hash.toHexString.to!string, "-c", "-I.", "-fPIC", k.to!string]);
+                    auto p = execv("/usr/bin/clang", ["/usr/bin/clang", "-o", hash ~ ".so", "-c", "-I.", "-fPIC", k.to!string]);
                     writefln(">222> %s", p);
                 }
+                wait(&pid);
+                void* func = dlopen("/lib/libc.so".toStringz, RTLD_LAZY);
+                writefln("%x", func);
             } catch (Exception e) {
                 writefln("<<<< %s", e);
             }
